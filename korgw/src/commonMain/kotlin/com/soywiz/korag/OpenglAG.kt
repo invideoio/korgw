@@ -24,6 +24,10 @@ import com.soywiz.korim.bitmap.NativeImage
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.vector.BitmapVector
 import com.soywiz.korio.lang.*
+import com.soywiz.korio.lang.Closeable
+import com.soywiz.korio.lang.invalidOp
+import com.soywiz.korio.lang.printStackTrace
+import com.soywiz.korio.lang.unsupported
 import com.soywiz.korma.geom.*
 import kotlin.jvm.JvmOverloads
 import kotlin.math.min
@@ -579,22 +583,55 @@ abstract class AGOpengl : AG() {
                     //println("GL_SHADING_LANGUAGE_VERSION: $glslVersionInt : $glslVersionString")
 
                     val guessedGlSlVersion = glSlVersion ?: gl.versionInt
-                    val usedGlSlVersion = GlslGenerator.FORCE_GLSL_VERSION?.toIntOrNull() ?: when (guessedGlSlVersion) {
-                        460 -> 460
-                        in 300..450 -> 100
-                        else -> guessedGlSlVersion
-                    }
+                    val usedGlSlVersion = GlslGenerator.FORCE_GLSL_VERSION?.toIntOrNull()
+                        ?: when (guessedGlSlVersion) {
+                            460 -> 460
+                            in 300..450 -> 100
+                            else -> guessedGlSlVersion
+                        }
 
                     if (GlslGenerator.DEBUG_GLSL) {
                         Console.trace("GLSL version: requested=$glSlVersion, guessed=$guessedGlSlVersion, forced=${GlslGenerator.FORCE_GLSL_VERSION}. used=$usedGlSlVersion")
                     }
 
-                    fragmentShaderId = createShaderCompat(gl.FRAGMENT_SHADER) { compatibility ->
-                        program.fragment.toNewGlslStringResult(GlslConfig(gles = gles, version = usedGlSlVersion, compatibility = compatibility, android = android, programConfig = programConfig)).result
+                    if (program.fragment.glslString != "") {
+                        fragmentShaderId = createShaderCompat(gl.FRAGMENT_SHADER) {
+                            program.fragment.glslString
+                        }
+
+                    } else {
+                        fragmentShaderId = createShaderCompat(gl.FRAGMENT_SHADER) { compatibility ->
+                            program.fragment.toNewGlslStringResult(
+                                GlslConfig(
+                                    gles = gles,
+                                    version = usedGlSlVersion,
+                                    compatibility = compatibility,
+                                    android = android,
+                                    programConfig = programConfig
+                                )
+                            ).result
+                        }
                     }
-                    vertexShaderId = createShaderCompat(gl.VERTEX_SHADER) { compatibility ->
-                        program.vertex.toNewGlslStringResult(GlslConfig(gles = gles, version = usedGlSlVersion, compatibility = compatibility, android = android, programConfig = programConfig)).result
+
+                    if (program.vertex.glslString != "") {
+                        vertexShaderId = createShaderCompat(gl.VERTEX_SHADER) {
+                            program.vertex.glslString
+                        }
+
+                    } else {
+                        vertexShaderId = createShaderCompat(gl.VERTEX_SHADER) { compatibility ->
+                            program.vertex.toNewGlslStringResult(
+                                GlslConfig(
+                                    gles = gles,
+                                    version = usedGlSlVersion,
+                                    compatibility = compatibility,
+                                    android = android,
+                                    programConfig = programConfig
+                                )
+                            ).result
+                        }
                     }
+
                     gl.attachShader(id, fragmentShaderId)
                     gl.attachShader(id, vertexShaderId)
                     gl.linkProgram(id)
