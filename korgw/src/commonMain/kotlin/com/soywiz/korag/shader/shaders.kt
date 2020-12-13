@@ -453,8 +453,9 @@ class Program(val vertex: VertexShader, val fragment: FragmentShader, val name: 
 	}
 }
 
-open class Shader(val type: ShaderType, val stm: Program.Stm) {
+open class Shader(val type: ShaderType, val stm: Program.Stm , val glsl : String) {
     private val stmHashCode = stm.hashCode()
+    var glslString = glsl
 
 	val uniforms = LinkedHashSet<Uniform>().also { out ->
         object : Program.Visitor<Unit>(Unit) {
@@ -472,8 +473,8 @@ open class Shader(val type: ShaderType, val stm: Program.Stm) {
     override fun hashCode(): Int = (type.hashCode() * 17) + stmHashCode
 }
 
-open class VertexShader(stm: Program.Stm) : Shader(ShaderType.VERTEX, stm)
-open class FragmentShader(stm: Program.Stm) : Shader(ShaderType.FRAGMENT, stm)
+open class VertexShader(stm: Program.Stm , glsl : String = "") : Shader(ShaderType.VERTEX, stm , glsl)
+open class FragmentShader(stm: Program.Stm , glsl : String = "") : Shader(ShaderType.FRAGMENT, stm , glsl)
 
 fun FragmentShader.appending(callback: Program.Builder.() -> Unit): FragmentShader {
 	return FragmentShader(

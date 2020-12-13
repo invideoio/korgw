@@ -711,6 +711,18 @@ abstract class AG : Extra by Extra.Mixin() {
 		}
 	}
 
+    inline fun renderToExternalRB(width: Int, height: Int, rb: RenderBuffer , render: () -> Unit) {
+        try {
+            rb.setSize(0, 0, width, height, width, height)
+            setRenderBufferTemporally(rb) {
+                clear(Colors.GREEN) // transparent
+                render()
+            }
+
+        } finally {
+        }
+    }
+
     inline fun renderToBitmap(bmp: Bitmap32, render: () -> Unit) {
         renderToTexture(bmp.width, bmp.height, {
             render()
