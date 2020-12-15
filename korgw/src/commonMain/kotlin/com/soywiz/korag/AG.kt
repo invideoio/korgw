@@ -711,11 +711,11 @@ abstract class AG : Extra by Extra.Mixin() {
 		}
 	}
 
-    inline fun renderToExternalRB(width: Int, height: Int, rb: RenderBuffer , render: () -> Unit) {
+    inline fun renderToExternalRB(width: Int, height: Int, rb: BaseRenderBuffer , render: () -> Unit) {
         try {
             rb.setSize(0, 0, width, height, width, height)
             setRenderBufferTemporally(rb) {
-                clear(Colors.GREEN) // transparent
+                clear(Colors.TRANSPARENT_BLACK) // transparent
                 render()
             }
 
