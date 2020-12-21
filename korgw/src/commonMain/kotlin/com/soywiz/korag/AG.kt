@@ -34,6 +34,11 @@ interface AGContainer {
 	fun repaint(): Unit
 }
 
+enum class AGTarget {
+    DISPLAY,
+    OFFSCREEN
+}
+
 interface AGWindow : AGContainer {
 }
 
@@ -622,7 +627,14 @@ abstract class AG : Extra by Extra.Mixin() {
         }
     }
 
-	val mainRenderBuffer: BaseRenderBuffer by lazy { createMainRenderBuffer() }
+    var agTarget = AGTarget.DISPLAY
+
+	val mainRenderBuffer: BaseRenderBuffer by lazy {
+        when (agTarget) {
+            AGTarget.DISPLAY -> createMainRenderBuffer()
+            AGTarget.OFFSCREEN -> createRenderBuffer()
+        }
+    }
 
     open fun createMainRenderBuffer() = BaseRenderBufferImpl()
 
