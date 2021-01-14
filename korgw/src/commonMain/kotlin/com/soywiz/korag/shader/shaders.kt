@@ -453,7 +453,7 @@ class Program(val vertex: VertexShader, val fragment: FragmentShader, val name: 
 	}
 }
 
-open class Shader(val type: ShaderType, val stm: Program.Stm , val glsl : String) {
+open class Shader(val type: ShaderType, val stm: Program.Stm , val glsl: String) {
     private val stmHashCode = stm.hashCode()
     var glslString = glsl
 
@@ -469,12 +469,12 @@ open class Shader(val type: ShaderType, val stm: Program.Stm , val glsl : String
         }.visit(stm)
     }.toSet()
 
-    override fun equals(other: Any?): Boolean = other is Shader && (this.type == other.type) && (this.stmHashCode == other.stmHashCode) && (this.stm == other.stm)
-    override fun hashCode(): Int = (type.hashCode() * 17) + stmHashCode
+    override fun equals(other: Any?): Boolean = other is Shader && (this.type == other.type) && (this.stmHashCode == other.stmHashCode) && (this.stm == other.stm) && (this.glslString.equals(other.glslString))
+    override fun hashCode(): Int = (type.hashCode() * 17) + stmHashCode + glslString.hashCode()
 }
 
-open class VertexShader(stm: Program.Stm , glsl : String = "") : Shader(ShaderType.VERTEX, stm , glsl)
-open class FragmentShader(stm: Program.Stm , glsl : String = "") : Shader(ShaderType.FRAGMENT, stm , glsl)
+open class VertexShader(stm: Program.Stm, glsl: String = "") : Shader(ShaderType.VERTEX, stm, glsl)
+open class FragmentShader(stm: Program.Stm, glsl: String = "") : Shader(ShaderType.FRAGMENT, stm, glsl)
 
 fun FragmentShader.appending(callback: Program.Builder.() -> Unit): FragmentShader {
 	return FragmentShader(
