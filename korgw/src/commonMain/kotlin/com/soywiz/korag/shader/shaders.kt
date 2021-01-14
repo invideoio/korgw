@@ -474,10 +474,10 @@ class Program(val vertex: VertexShader, val fragment: FragmentShader, val name: 
 	}
 }
 
-open class Shader(val type: ShaderType, val stm: Program.Stm , val glsl : String) {
+open class Shader(val type: ShaderType, val stm: Program.Stm , val glsl: String) {
     private val stmHashCode = stm.hashCode()
-    private val cachedHashCode = (type.hashCode() * 17) + stmHashCode
     var glslString = glsl
+    private val cachedHashCode = (type.hashCode() * 31) + stmHashCode * 17 + glslString.hashCode()
 
 	val uniforms = LinkedHashSet<Uniform>().also { out ->
         object : Program.Visitor<Unit>(Unit) {
@@ -491,7 +491,7 @@ open class Shader(val type: ShaderType, val stm: Program.Stm , val glsl : String
         }.visit(stm)
     }.toSet()
 
-    override fun equals(other: Any?): Boolean = other is Shader && (this.type == other.type) && (this.stmHashCode == other.stmHashCode) && (this.stm == other.stm)
+    override fun equals(other: Any?): Boolean = other is Shader && (this.type == other.type) && (this.stmHashCode == other.stmHashCode) && (this.stm == other.stm) && (this.glslString.equals(other.glslString))
     override fun hashCode(): Int = cachedHashCode
 }
 
