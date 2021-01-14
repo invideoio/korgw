@@ -581,12 +581,30 @@ abstract class AGOpengl : AG() {
                     println("GLSL version: requested=$glSlVersion, guessed=$guessedGlSlVersion, forced=${GlslGenerator.FORCE_GLSL_VERSION}. used=$usedGlSlVersion")
                 }
 
-                fragmentShaderId = createShaderCompat(gl.FRAGMENT_SHADER) { compatibility ->
-                    program.fragment.toNewGlslStringResult(GlslConfig(gles = gles, version = usedGlSlVersion, compatibility = compatibility, android = android, programConfig = programConfig)).result
+                println("string is ....." + program.fragment.glslString)
+
+                if (program.fragment.glslString != "") {
+                    fragmentShaderId = createShaderCompat(gl.FRAGMENT_SHADER) {
+                        program.fragment.glslString
+                    }
+
+                } else {
+                    fragmentShaderId = createShaderCompat(gl.FRAGMENT_SHADER) { compatibility ->
+                        program.fragment.toNewGlslStringResult(GlslConfig(gles = gles, version = usedGlSlVersion, compatibility = compatibility, android = android, programConfig = programConfig)).result
+                    }
                 }
-                vertexShaderId = createShaderCompat(gl.VERTEX_SHADER) { compatibility ->
-                    program.vertex.toNewGlslStringResult(GlslConfig(gles = gles, version = usedGlSlVersion, compatibility = compatibility, android = android, programConfig = programConfig)).result
+
+                if (program.vertex.glslString != "") {
+                    vertexShaderId = createShaderCompat(gl.VERTEX_SHADER) {
+                        program.vertex.glslString
+                    }
+
+                } else {
+                    vertexShaderId = createShaderCompat(gl.VERTEX_SHADER) { compatibility ->
+                        program.vertex.toNewGlslStringResult(GlslConfig(gles = gles, version = usedGlSlVersion, compatibility = compatibility, android = android, programConfig = programConfig)).result
+                    }
                 }
+
                 gl.attachShader(id, fragmentShaderId)
                 gl.attachShader(id, vertexShaderId)
                 gl.linkProgram(id)
