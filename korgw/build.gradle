@@ -82,3 +82,5 @@ task runSampleFirstThread(type: JavaExec) {
 task runSampleMainThread {
     dependsOn runSampleFirstThread
 }
+
+apply from:"publish.gradle.kts"
