@@ -1,6 +1,5 @@
 package com.soywiz.korgw
 
-import com.soywiz.kgl.internal.*
 import com.soywiz.kgl.toInt
 import com.soywiz.kmem.*
 import com.soywiz.korag.*
@@ -10,8 +9,8 @@ import com.soywiz.korio.file.*
 import com.soywiz.korio.net.*
 import com.soywiz.korma.geom.*
 import kotlinx.cinterop.*
+import platform.opengl32.*
 import platform.windows.*
-import kotlin.math.*
 
 
 //override val ag: AG = AGNative()
@@ -39,10 +38,10 @@ private fun Bitmap32.toWin32Icon(): HICON? {
         bi.bV5Compression = BI_BITFIELDS.convert()
         // The following mask specification specifies a supported 32 BPP
         // alpha format for Windows XP.
-        bi.bV5RedMask = 0x00FF0000.convert()
-        bi.bV5GreenMask = 0x0000FF00.convert()
-        bi.bV5BlueMask = 0x000000FF.convert()
-        bi.bV5AlphaMask = 0xFF000000.convert()
+        bi.bV5RedMask = 0x00_00_00_FF.convert()
+        bi.bV5GreenMask = 0x00_00_FF_00.convert()
+        bi.bV5BlueMask = 0x00_FF_00_00.convert()
+        bi.bV5AlphaMask = 0xFF_00_00_00.convert()
 
         val lpBits = alloc<COpaquePointerVar>()
         val hdc = GetDC(null)
@@ -129,9 +128,12 @@ class WindowsGameWindow : EventLoopGameWindow() {
     private var fsY = 0
     private var fsW = 128
     private var fsH = 128
+    private var lastFullScreen: Boolean? = null
     override var fullscreen: Boolean
-        get() = GetWindowLongPtrA(hwnd, GWL_STYLE.convert()).toLong().hasBits(WS_POPUP.toLong())
+        get() = if (hwnd != null) GetWindowLongPtrA(hwnd, GWL_STYLE.convert()).toLong().hasBits(WS_POPUP.toLong()) else lastFullScreen ?: false
         set(value) {
+            lastFullScreen = value
+            if (hwnd == null) return
             if (fullscreen == value) return
             memScoped {
                 val style = GetWindowLongPtrA(hwnd, GWL_STYLE.convert())
@@ -143,14 +145,14 @@ class WindowsGameWindow : EventLoopGameWindow() {
                     fsW = rect.width
                     fsH = rect.height
 
-                    SetWindowLongPtrA(hwnd, GWL_STYLE.convert(), style.toLong().without(WS_OVERLAPPEDWINDOW.toLong()).with(WS_POPUP.toLong()).convert())
+                    SetWindowLongPtrA(hwnd, GWL_STYLE.convert(), getWinStyle(true, style).convert())
                     MoveWindow(hwnd, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), TRUE)
-                    SetWindowLongPtrA(hwnd, GWL_EXSTYLE.convert(), 0.convert())
+                    SetWindowLongPtrA(hwnd, GWL_EXSTYLE.convert(), getWinExStyle(true).convert())
                     //ShowWindow(hwnd, SW_MAXIMIZE)
                 } else {
-                    SetWindowLongPtrA(hwnd, GWL_STYLE.convert(), style.toLong().without(WS_POPUP.toLong()).with(WS_OVERLAPPEDWINDOW.toLong()).convert())
+                    SetWindowLongPtrA(hwnd, GWL_STYLE.convert(), getWinStyle(false, style).convert())
                     MoveWindow(hwnd, fsX, fsY, fsW, fsH, TRUE)
-                    SetWindowLongPtrA(hwnd, GWL_EXSTYLE.convert(), 256.convert())
+                    SetWindowLongPtrA(hwnd, GWL_EXSTYLE.convert(), getWinExStyle(false).convert())
                     //ShowWindow(hwnd, SW_RESTORE)
                 }
             }
@@ -207,7 +209,7 @@ class WindowsGameWindow : EventLoopGameWindow() {
         return super.prompt(message, default)
     }
 
-    override suspend fun openFileDialog(filter: String?, write: Boolean, multi: Boolean): List<VfsFile> {
+    override suspend fun openFileDialog(filter: FileFilter?, write: Boolean, multi: Boolean, currentDir: VfsFile?): List<VfsFile> {
         val selectedFile = openSelectFile(hwnd = hwnd)
         if (selectedFile != null) {
             return listOf(com.soywiz.korio.file.std.localVfs(selectedFile))
@@ -302,34 +304,48 @@ class WindowsGameWindow : EventLoopGameWindow() {
             val screenHeight = GetSystemMetrics(SM_CYSCREEN)
 
             val realSize = getRealSize(windowWidth, windowHeight)
-            val realWidth = realSize.width
-            val realHeight = realSize.height
+            val realWidth = realSize.width//.clamp(0, screenWidth)
+            val realHeight = realSize.height//.clamp(0, screenHeight)
 
             //println("Initial window size: $windowWidth, $windowHeight")
 
+            fsX = ((screenWidth - realWidth) / 2).clamp(0, screenWidth - 16)
+            fsY = ((screenHeight - realHeight) / 2).clamp(0, realHeight - 16)
+            fsW = realWidth
+            fsH = realHeight
+
+            //val initialFullScreen = lastFullScreen
+            val initialFullScreen = false
+
             hwnd = CreateWindowExW(
-                winExStyle.convert(),
+                getWinExStyle(initialFullScreen).convert(),
                 clazzName,
                 title,
-                winStyle.convert(),
-                min2(max2(0, (screenWidth - realWidth) / 2), screenWidth - 16).convert(),
-                min2(max2(0, (screenHeight - realHeight) / 2), screenHeight - 16).convert(),
-                realWidth.convert(),
-                realHeight.convert(),
+                getWinStyle(initialFullScreen).convert(),
+                if (initialFullScreen) 0 else fsX.convert(),
+                if (initialFullScreen) 0 else fsY.convert(),
+                if (initialFullScreen) screenWidth else fsW.convert(),
+                if (initialFullScreen) screenHeight else fsH.convert(),
                 null, null, null, null
             )
             println("ERROR: " + GetLastError())
 
             _setIcon()
             ShowWindow(hwnd, SW_SHOWNORMAL.convert())
+            if (lastFullScreen != null) {
+                fullscreen = lastFullScreen!!
+            }
 
             //SetTimer(hwnd, 1, 1000 / 60, staticCFunction(::WndTimer))
         }
     }
 
     private val hasMenu = false
-    private val winStyle = WS_OVERLAPPEDWINDOW
-    private val winExStyle = WS_EX_CLIENTEDGE
+    private val winStyle: Long get() = getWinStyle(fullscreen)
+    private val winExStyle: Long get() = getWinExStyle(fullscreen)
+
+    fun getWinStyle(fullscreen: Boolean, extra: Long = 0): Long = if (fullscreen) extra.without(WS_OVERLAPPEDWINDOW.toLong()).with(WS_POPUP.toLong()) else extra.with(WS_OVERLAPPEDWINDOW.toLong()).without(WS_POPUP.toLong())
+    fun getWinExStyle(fullscreen: Boolean): Long = if (fullscreen) 0L else WS_EX_OVERLAPPEDWINDOW.toLong()
 
     fun getBorderSize(): SizeInt {
         val w = 1000
@@ -348,10 +364,9 @@ class WindowsGameWindow : EventLoopGameWindow() {
         }
     }
 
-    fun keyUpdate(keyCode: Int, down: Boolean) {
-        // @TODO: KeyEvent.Tpe.TYPE
+    fun keyEvent(keyCode: Int, type: KeyEvent.Type) {
         dispatch(keyEvent.apply {
-            this.type = if (down) com.soywiz.korev.KeyEvent.Type.DOWN else com.soywiz.korev.KeyEvent.Type.UP
+            this.type = type
             this.id = 0
             this.key = KEYS[keyCode] ?: com.soywiz.korev.Key.UNKNOWN
             this.keyCode = keyCode
@@ -363,9 +378,18 @@ class WindowsGameWindow : EventLoopGameWindow() {
         })
     }
 
+    fun keyUpdate(keyCode: Int, down: Boolean) {
+        keyEvent(keyCode, if (down) com.soywiz.korev.KeyEvent.Type.DOWN else com.soywiz.korev.KeyEvent.Type.UP)
+    }
+
+    fun keyType(character: Int) {
+        keyEvent(character, com.soywiz.korev.KeyEvent.Type.TYPE)
+    }
+
     fun mouseEvent(
         etype: com.soywiz.korev.MouseEvent.Type, ex: Int, ey: Int,
-        ebutton: Int, wParam: Int, scrollDeltaY: Double = 0.0
+        ebutton: Int, wParam: Int, scrollDeltaX: Double = 0.0, scrollDeltaY: Double = 0.0, scrollDeltaZ: Double = 0.0,
+        scrollDeltaMode: MouseEvent.ScrollDeltaMode = MouseEvent.ScrollDeltaMode.LINE
     ) {
         val lbutton = (wParam and MK_LBUTTON) != 0
         val rbutton = (wParam and MK_RBUTTON) != 0
@@ -392,7 +416,10 @@ class WindowsGameWindow : EventLoopGameWindow() {
             this.isCtrlDown = control
             this.isShiftDown = shift
             this.isMetaDown = GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0
+            this.scrollDeltaX = scrollDeltaX
             this.scrollDeltaY = scrollDeltaY
+            this.scrollDeltaZ = scrollDeltaZ
+            this.scrollDeltaMode = MouseEvent.ScrollDeltaMode.LINE
             //this.scaleCoords = false
         })
     }
@@ -405,6 +432,7 @@ val _WM_QUIT: UINT = WM_QUIT.convert()
 val _WM_MOUSEMOVE: UINT = WM_MOUSEMOVE.convert()
 val _WM_MOUSELEAVE: UINT = WM_MOUSELEAVE.convert()
 val _WM_MOUSEWHEEL: UINT = WM_MOUSEWHEEL.convert()
+val _WM_MOUSEHWHEEL: UINT = WM_MOUSEHWHEEL.convert()
 val _WM_LBUTTONDOWN: UINT = WM_LBUTTONDOWN.convert()
 val _WM_MBUTTONDOWN: UINT = WM_MBUTTONDOWN.convert()
 val _WM_RBUTTONDOWN: UINT = WM_RBUTTONDOWN.convert()
@@ -416,6 +444,8 @@ val _WM_KEYUP: UINT = WM_KEYUP.convert()
 val _WM_SYSKEYDOWN: UINT = WM_SYSKEYDOWN.convert()
 val _WM_SYSKEYUP: UINT = WM_SYSKEYUP.convert()
 val _WM_CLOSE: UINT = WM_CLOSE.convert()
+val _WM_CHAR: UINT = WM_CHAR.convert()
+val _WM_UNICHAR: UINT = WM_UNICHAR.convert()
 
 @Suppress("UNUSED_PARAMETER")
 fun WndProc(hWnd: HWND?, message: UINT, wParam: WPARAM, lParam: LPARAM): LRESULT {
@@ -444,6 +474,7 @@ fun WndProc(hWnd: HWND?, message: UINT, wParam: WPARAM, lParam: LPARAM): LRESULT
 
                 println("wglSwapIntervalEXT: $wglSwapIntervalEXT")
                 wglSwapIntervalEXT?.invoke(0)
+                glClear(0) // Required since wglMakeCurrent is in the windows package but requires openGL32.dll
 
                 println("GL_CONTEXT: ${windowsGameWindow.glRenderContext}")
             }
@@ -469,10 +500,25 @@ fun WndProc(hWnd: HWND?, message: UINT, wParam: WPARAM, lParam: LPARAM): LRESULT
             val y = lParam.toInt().extract(16, 16)
             mouseMove(x, y, wParam.toInt())
         }
-        _WM_MOUSEWHEEL -> {
+        _WM_MOUSEWHEEL, _WM_MOUSEHWHEEL -> {
+            val vertical = message == _WM_MOUSEWHEEL
             val type = com.soywiz.korev.MouseEvent.Type.SCROLL
-            val scrollDeltaY = wParam.toInt().extract(16, 8).toByte().toDouble()
-            windowsGameWindow.mouseEvent(type, mouseX, mouseY, 8, wParam.toInt(), scrollDeltaY)
+            // #define GET_WHEEL_DELTA_WPARAM(wParam) ((short)HIWORD(wParam))
+            // @TODO: To retrieve the wheel scroll units, use the inputData filed of the POINTER_INFO
+            // @TODO: structure returned by calling GetPointerInfo function. This field contains a signed value
+            // @TODO: and is expressed in a multiple of WHEEL_DELTA. A positive value indicates a rotation forward
+            // @TODO: and a negative value indicates a rotation backward.
+            // @TODO: https://docs.microsoft.com/en-us/windows/win32/inputmsg/wm-pointerhwheel
+            val intWheelDelta = wParam.toInt().extract(16, 16).toShort().toInt()
+            val scrollDelta = (-intWheelDelta.toDouble() / 120) * 3
+            //println("vertical=$vertical, scrollDelta=$scrollDelta, intWheelDelta=$intWheelDelta")
+            windowsGameWindow.mouseEvent(
+                type, mouseX, mouseY, 8, wParam.toInt(),
+                scrollDeltaX = if (!vertical) scrollDelta else 0.0,
+                scrollDeltaY = if (vertical) scrollDelta else 0.0,
+                scrollDeltaZ = 0.0,
+                scrollDeltaMode = MouseEvent.ScrollDeltaMode.LINE
+            )
         }
         _WM_LBUTTONDOWN -> mouseButton(0, true, wParam.toInt())
         _WM_MBUTTONDOWN -> mouseButton(1, true, wParam.toInt())
@@ -484,9 +530,9 @@ fun WndProc(hWnd: HWND?, message: UINT, wParam: WPARAM, lParam: LPARAM): LRESULT
         _WM_KEYUP -> windowsGameWindow.keyUpdate(wParam.toInt(), false)
         _WM_SYSKEYDOWN -> windowsGameWindow.keyUpdate(wParam.toInt(), true)
         _WM_SYSKEYUP -> windowsGameWindow.keyUpdate(wParam.toInt(), false)
-        _WM_CLOSE -> {
-            kotlin.system.exitProcess(0)
-        }
+        _WM_CHAR -> windowsGameWindow.keyType(wParam.toInt())
+        //_WM_UNICHAR -> windowsGameWindow.keyType(wParam.toInt())
+        _WM_CLOSE -> kotlin.system.exitProcess(0)
     }
     return DefWindowProcW(hWnd, message, wParam, lParam)
 }
@@ -498,11 +544,11 @@ val GetOpenFileNameWFunc by lazy {
     GetProcAddress(COMDLG32_DLL, "GetOpenFileNameW") as CPointer<CFunction<Function1<CPointer<OPENFILENAMEW>, BOOL>>>
 }
 
-data class FileFilter(val name: String, val pattern: String)
+data class WinFileFilter(val name: String, val pattern: String)
 
 fun openSelectFile(
     initialDir: String? = null,
-    filters: List<FileFilter> = listOf(FileFilter("All (*.*)", "*.*")),
+    filters: List<WinFileFilter> = listOf(WinFileFilter("All (*.*)", "*.*")),
     hwnd: HWND? = null
 ): String? = memScoped {
     val szFileSize = 1024

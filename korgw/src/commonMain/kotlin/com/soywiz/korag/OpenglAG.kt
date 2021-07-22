@@ -1,12 +1,10 @@
 package com.soywiz.korag
 
-import com.soywiz.kds.Extra
-import com.soywiz.kds.FastStringMap
-import com.soywiz.kds.getOrPut
+import com.soywiz.kds.*
+import com.soywiz.kds.iterators.*
 import com.soywiz.kgl.*
-import com.soywiz.kgl.internal.*
-import com.soywiz.kgl.internal.min2
 import com.soywiz.klock.*
+import com.soywiz.klock.min
 import com.soywiz.klogger.*
 import com.soywiz.kmem.*
 import com.soywiz.korag.internal.setFloats
@@ -14,13 +12,8 @@ import com.soywiz.korag.shader.Program
 import com.soywiz.korag.shader.ProgramConfig
 import com.soywiz.korag.shader.VarKind
 import com.soywiz.korag.shader.VarType
-import com.soywiz.korag.shader.gl.GlslConfig
-import com.soywiz.korag.shader.gl.GlslGenerator
-import com.soywiz.korag.shader.gl.toNewGlslStringResult
-import com.soywiz.korim.bitmap.Bitmap
-import com.soywiz.korim.bitmap.Bitmap32
-import com.soywiz.korim.bitmap.Bitmap8
-import com.soywiz.korim.bitmap.NativeImage
+import com.soywiz.korag.shader.gl.*
+import com.soywiz.korim.bitmap.*
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.vector.BitmapVector
 import com.soywiz.korio.lang.*
@@ -29,21 +22,27 @@ import com.soywiz.korio.lang.invalidOp
 import com.soywiz.korio.lang.printStackTrace
 import com.soywiz.korio.lang.unsupported
 import com.soywiz.korma.geom.*
+import com.soywiz.krypto.encoding.*
 import kotlin.jvm.JvmOverloads
-import kotlin.math.min
+import kotlin.math.*
 
 abstract class AGOpengl : AG() {
     class ShaderException(val str: String, val error: String, val errorInt: Int, val gl: KmlGl) :
-        RuntimeException("Error Compiling Shader : $errorInt : '$error' : source='$str', gl.versionInt=${gl.versionInt}, gl.versionString='${gl.versionString}', gl=$gl")
+        RuntimeException("Error Compiling Shader : ${errorInt.hex} : '$error' : source='$str', gl.versionInt=${gl.versionInt}, gl.versionString='${gl.versionString}', gl=$gl")
 
     open var isGlAvailable = true
     abstract val gl: KmlGl
+
+    override val graphicExtensions: Set<String> get() = gl.graphicExtensions
+    override val isFloatTextureSupported: Boolean get() = gl.isFloatTextureSupported
+    override val isInstancedSupported: Boolean get() = gl.isInstancedSupported
 
     open val glSlVersion: Int? = null
     open val gles: Boolean = false
     open val linux: Boolean = false
     open val android: Boolean = false
-    open val webgl: Boolean = false
+    open val webgl: Boolean get() = false
+    open val webgl2: Boolean get() = false
 
     override var devicePixelRatio: Double = 1.0
 
@@ -247,10 +246,9 @@ abstract class AGOpengl : AG() {
     }
 
     override fun draw(batch: Batch) {
-        val vertices = batch.vertices
+        val instances = batch.instances
         val program = batch.program
         val type = batch.type
-        val vertexLayout = batch.vertexLayout
         val vertexCount = batch.vertexCount
         val indices = batch.indices
         val indexType = batch.indexType
@@ -262,9 +260,6 @@ abstract class AGOpengl : AG() {
         val renderState = batch.renderState
         val scissor = batch.scissor
 
-        val vattrs = vertexLayout.attributes
-        val vattrspos = vertexLayout.attributePositions
-
         //finalScissor.setTo(0, 0, backWidth, backHeight)
         applyScissorState(scissor)
 
@@ -275,8 +270,8 @@ abstract class AGOpengl : AG() {
             val value = uniforms.values[n]
             when (uniformType) {
                 VarType.TextureUnit -> {
-                    val unit = value as TextureUnit
-                    val tex = (unit.texture as GlTexture?)
+                    val unit = value.fastCastTo<TextureUnit>()
+                    val tex = (unit.texture.fastCastTo<GlTexture?>())
                     if (tex != null) {
                         if (tex.forcedTexTarget != gl.TEXTURE_2D && tex.forcedTexTarget != -1) {
                             useExternalSampler = true
@@ -286,17 +281,27 @@ abstract class AGOpengl : AG() {
             }
         }
 
-        checkBuffers(vertices, indices)
+        if (indices != null && indices.kind != Buffer.Kind.INDEX) invalidOp("Not a IndexBuffer")
+
         val programConfig = if (useExternalSampler) ProgramConfig.EXTERNAL_TEXTURE_SAMPLER else ProgramConfig.DEFAULT
         val glProgram = getProgram(program, programConfig)
-        (vertices as GlBuffer).bind(gl)
         (indices as? GlBuffer?)?.bind(gl)
         glProgram.use()
 
-        val totalSize = vertexLayout.totalSize
-        for (n in 0 until vattrspos.size) {
-            val att = vattrs[n]
-            if (att.active) {
+        batch.vertexData.fastForEach { entry ->
+            val vertices = entry.buffer as GlBuffer
+            val vertexLayout = entry.layout
+
+            val vattrs = vertexLayout.attributes
+            val vattrspos = vertexLayout.attributePositions
+
+            if (vertices.kind != AG.Buffer.Kind.VERTEX) invalidOp("Not a VertexBuffer")
+
+            vertices.bind(gl)
+            val totalSize = vertexLayout.totalSize
+            for (n in 0 until vattrspos.size) {
+                val att = vattrs[n]
+                if (!att.active) continue
                 val off = vattrspos[n]
                 val loc = glProgram.getAttribLocation(att.name)
                 val glElementType = att.type.glElementType
@@ -304,6 +309,9 @@ abstract class AGOpengl : AG() {
                 if (loc >= 0) {
                     gl.enableVertexAttribArray(loc)
                     gl.vertexAttribPointer(loc, elementCount, glElementType, att.normalized, totalSize, off.toLong())
+                    if (att.divisor != 0) {
+                        gl.vertexAttribDivisor(loc, att.divisor)
+                    }
                 }
             }
         }
@@ -321,21 +329,18 @@ abstract class AGOpengl : AG() {
             //println("uniform: $uniform, arrayCount=$arrayCount, stride=$stride")
 
             when (uniformType) {
-                VarType.TextureUnit -> {
-                    val unit = value as TextureUnit
+                VarType.TextureUnit, VarType.SamplerCube -> {
+                    val unit = value.fastCastTo<TextureUnit>()
                     gl.activeTexture(gl.TEXTURE0 + textureUnit)
-                    val tex = (unit.texture as GlTexture?)
-                    tex?.bindEnsuring()
-                    tex?.setFilter(unit.linear)
-                    gl.uniform1i(location, textureUnit)
-                    textureUnit++
-                }
-                VarType.SamplerCube -> {
-                    val unit = value as TextureUnit
-                    gl.activeTexture(gl.TEXTURE0 + textureUnit)
-                    val tex = unit.texture as TextureGeneric
-                    tex.initialiseIfNeeded()
-                    tex.bindEnsuring()
+                    if (uniformType == VarType.TextureUnit) {
+                        val tex = (unit.texture.fastCastTo<GlTexture?>())
+                        tex?.bindEnsuring()
+                        tex?.setFilter(unit.linear)
+                    } else {
+                        val tex = unit.texture.fastCastTo<TextureGeneric>()
+                        tex.initialiseIfNeeded()
+                        tex.bindEnsuring()
+                    }
                     gl.uniform1i(location, textureUnit)
                     textureUnit++
                 }
@@ -344,8 +349,8 @@ abstract class AGOpengl : AG() {
                         is Array<*> -> value
                         is Matrix3D -> mat3dArray.also { it[0].copyFrom(value) }
                         else -> error("Not an array or a matrix3d")
-                    } as Array<Matrix3D>
-                    val arrayCount = min2(declArrayCount, matArray.size)
+                    }.fastCastTo<Array<Matrix3D>>()
+                    val arrayCount = min(declArrayCount, matArray.size)
 
                     val matSize = when (uniformType) {
                         VarType.Mat2 -> 2; VarType.Mat3 -> 3; VarType.Mat4 -> 4; else -> -1
@@ -392,11 +397,11 @@ abstract class AGOpengl : AG() {
                         is Number -> tempBuffer.setAlignedFloat32(0, value.toFloat())
                         is Vector3D -> tempBuffer.setFloats(0, value.data, 0, stride)
                         is FloatArray -> {
-                            arrayCount = min2(declArrayCount, value.size / stride)
+                            arrayCount = min(declArrayCount, value.size / stride)
                             tempBuffer.setFloats(0, value, 0, stride * arrayCount)
                         }
                         is Array<*> -> {
-                            arrayCount = min2(declArrayCount, value.size)
+                            arrayCount = min(declArrayCount, value.size)
                             for (n in 0 until value.size) {
                                 val vector = value[n] as Vector3D
                                 tempBuffer.setFloats(n * stride, vector.data, 0, stride)
@@ -485,19 +490,32 @@ abstract class AGOpengl : AG() {
         //println("viewport=${viewport.getAlignedInt32(0)},${viewport.getAlignedInt32(1)},${viewport.getAlignedInt32(2)},${viewport.getAlignedInt32(3)}")
 
         if (indices != null) {
-            gl.drawElements(type.glDrawMode, vertexCount, indexType.glIndexType, offset)
+            if (instances != 1) {
+                gl.drawElementsInstanced(type.glDrawMode, vertexCount, indexType.glIndexType, offset, instances)
+            } else {
+                gl.drawElements(type.glDrawMode, vertexCount, indexType.glIndexType, offset)
+            }
         } else {
-            gl.drawArrays(type.glDrawMode, offset, vertexCount)
+            if (instances != 1) {
+                gl.drawArraysInstanced(type.glDrawMode, offset, vertexCount, instances)
+            } else {
+                gl.drawArrays(type.glDrawMode, offset, vertexCount)
+            }
         }
 
         //glSetActiveTexture(gl.TEXTURE0)
 
-        for (n in 0 until vattrs.size) {
-            val att = vattrs[n]
-            if (att.active) {
-                val loc = glProgram.getAttribLocation(att.name).toInt()
-                if (loc >= 0) {
-                    gl.disableVertexAttribArray(loc)
+        batch.vertexData.fastForEach { entry ->
+            val vattrs = entry.layout.attributes
+            vattrs.fastForEach { att ->
+                if (att.active) {
+                    val loc = glProgram.getAttribLocation(att.name).toInt()
+                    if (loc >= 0) {
+                        if (att.divisor != 0) {
+                            gl.vertexAttribDivisor(loc, 0)
+                        }
+                        gl.disableVertexAttribArray(loc)
+                    }
                 }
             }
         }
@@ -837,26 +855,14 @@ abstract class AGOpengl : AG() {
                 return texIds.getInt(0)
             }
 
-        fun createBufferForBitmap(bmp: Bitmap?): FBuffer? {
-            return when (bmp) {
-                null -> null
-                is NativeImage -> unsupported("Should not call createBufferForBitmap with a NativeImage")
-                is Bitmap8 -> {
-                    val mem = FBuffer(bmp.area)
-                    arraycopy(bmp.data, 0, mem.arrayByte, 0, bmp.area)
-                    @Suppress("USELESS_CAST")
-                    return mem
-                }
-                else -> {
-                    val abmp: Bitmap32 =
-                        if (premultiplied) bmp.toBMP32IfRequired().premultipliedIfRequired() else bmp.toBMP32IfRequired().depremultipliedIfRequired()
-                    //println("BMP: Bitmap32")
-                    //val abmp: Bitmap32 = bmp
-                    val mem = FBuffer(abmp.area * 4)
-                    arraycopy(abmp.data.ints, 0, mem.arrayInt, 0, abmp.area)
-                    @Suppress("USELESS_CAST")
-                    return mem
-                }
+        fun createBufferForBitmap(bmp: Bitmap?): FBuffer? = when (bmp) {
+            null -> null
+            is NativeImage -> unsupported("Should not call createBufferForBitmap with a NativeImage")
+            is Bitmap8 -> FBuffer(bmp.area).also { mem -> arraycopy(bmp.data, 0, mem.arrayByte, 0, bmp.area) }
+            is FloatBitmap32 -> FBuffer(bmp.area * 4 * 4).also { mem -> arraycopy(bmp.data, 0, mem.arrayFloat, 0, bmp.area * 4) }
+            else -> FBuffer(bmp.area * 4).also { mem ->
+                val abmp: Bitmap32 = if (premultiplied) bmp.toBMP32IfRequired().premultipliedIfRequired() else bmp.toBMP32IfRequired().depremultipliedIfRequired()
+                arraycopy(abmp.data.ints, 0, mem.arrayInt, 0, abmp.area)
             }
         }
 
@@ -870,6 +876,7 @@ abstract class AGOpengl : AG() {
             } else {
                 gl.LUMINANCE
             }
+            val isFloat = bmp is FloatBitmap32
 
             val bmp = when (bmp) {
                 is BitmapVector -> bmp.nativeImage
@@ -898,11 +905,17 @@ abstract class AGOpengl : AG() {
                     val buffer = createBufferForBitmap(bmp)
                     if (buffer != null && source.width != 0 && source.height != 0 && buffer.size != 0) {
                         prepareTexImage2D()
-                        gl.texImage2D(
-                            forcedTexTarget, 0, type,
-                            source.width, source.height,
-                            0, type, gl.UNSIGNED_BYTE, buffer
-                        )
+                        val internalFormat = when {
+                            isFloat && (webgl2 || !webgl) -> GL_RGBA32F
+                            else -> type
+                        }
+                        val format = type
+                        val texType = when {
+                            isFloat -> gl.FLOAT
+                            else -> gl.UNSIGNED_BYTE
+                        }
+                        //println("actualSyncUpload: webgl=$webgl, internalFormat=${internalFormat.hex}, format=${format.hex}, textype=${texType.hex}")
+                        gl.texImage2D(forcedTexTarget, 0, internalFormat, source.width, source.height, 0, format, texType, buffer)
                     }
                     //println(buffer)
                 }
@@ -921,6 +934,8 @@ abstract class AGOpengl : AG() {
                 //println(" - nomipmaps")
             }
         }
+
+        private val GL_RGBA32F = 0x8814
 
         // https://download.blender.org/source/chest/blender_1.72_tree/glut-win/glut_bitmap.c
         private val GL_UNPACK_ALIGNMENT = 0x0CF5

@@ -1,8 +1,10 @@
 package com.soywiz.korgw
 
+import com.soywiz.kds.iterators.*
 import com.soywiz.klock.PerformanceCounter
 import com.soywiz.korag.*
 import com.soywiz.korev.*
+import com.soywiz.korev.Touch
 import com.soywiz.korim.bitmap.*
 import com.soywiz.korim.format.PNG
 import com.soywiz.korio.async.*
@@ -20,7 +22,7 @@ import org.w3c.files.*
 
 private external val navigator: dynamic
 
-class BrowserGameWindow : GameWindow() {
+open class BrowserGameWindow : GameWindow() {
     override val ag: AGWebgl = AGWebgl(AGConfig())
     val canvas get() = ag.canvas
 
@@ -86,44 +88,26 @@ class BrowserGameWindow : GameWindow() {
 
     private fun onResized() {
         isTouchDeviceCache = null
-        val scale = quality.computeTargetScale(window.innerWidth, window.innerHeight, ag.devicePixelRatio)
-        canvasRatio = scale
-        canvas.width = (window.innerWidth * scale).toInt()
-        canvas.height = (window.innerHeight * scale).toInt()
-        canvas.style.position = "absolute"
-        canvas.style.left = "0"
-        canvas.style.right = "0"
-        canvas.style.width = "${window.innerWidth}px"
-        canvas.style.height = "${window.innerHeight}px"
+        if (isCanvasCreatedAndHandled) {
+            val scale = quality.computeTargetScale(window.innerWidth, window.innerHeight, ag.devicePixelRatio)
+            val canvasWidth = (window.innerWidth * scale).toInt()
+            val canvasHeight = (window.innerHeight * scale).toInt()
+            canvas.width = canvasWidth
+            canvas.height = canvasHeight
+            canvas.style.position = "absolute"
+            canvas.style.left = "0"
+            canvas.style.right = "0"
+            canvas.style.width = "${window.innerWidth}px"
+            canvas.style.height = "${window.innerHeight}px"
+            canvasRatio = scale
 
-        canvas.ondragenter = {
-            dispatchDropfileEvent(DropFileEvent.Type.START, null)
+            //ag.resized(canvas.width, canvas.height)
+            //dispatchReshapeEvent(0, 0, window.innerWidth, window.innerHeight)
+        } else {
+            canvasRatio = (canvas.width.toDouble() / canvas.clientWidth.toDouble())
         }
-        canvas.ondragexit = {
-            dispatchDropfileEvent(DropFileEvent.Type.END, null)
-        }
-        canvas.ondragleave = {
-            dispatchDropfileEvent(DropFileEvent.Type.END, null)
-        }
-        canvas.ondragover = {
-            it.preventDefault()
-        }
-        canvas.ondragstart = {
-            dispatchDropfileEvent(DropFileEvent.Type.START, null)
-        }
-        canvas.ondragend = {
-            dispatchDropfileEvent(DropFileEvent.Type.END, null)
-        }
-        canvas.ondrop = {
-            it.preventDefault()
-            dispatchDropfileEvent(DropFileEvent.Type.END, null)
-            val items = it.dataTransfer!!.items
-            val files = (0 until items.length).map { items[it]?.getAsFile()?.toVfs() }.filterNotNull()
-            dispatchDropfileEvent(DropFileEvent.Type.DROP, files)
-        }
+        //canvasRatio = (canvas.width.toDouble() / canvas.clientWidth.toDouble())
 
-        //ag.resized(canvas.width, canvas.height)
-        //dispatchReshapeEvent(0, 0, window.innerWidth, window.innerHeight)
         dispatchReshapeEvent(0, 0, canvas.width, canvas.height)
     }
 
@@ -135,6 +119,64 @@ class BrowserGameWindow : GameWindow() {
     inline fun transformEventY(y: Double): Double = y * canvasRatio
 
     private fun keyEvent(me: KeyboardEvent) {
+        val key = when (me.key) {
+            "0" -> Key.N0; "1" -> Key.N1; "2" -> Key.N2; "3" -> Key.N3
+            "4" -> Key.N4; "5" -> Key.N5; "6" -> Key.N6; "7" -> Key.N7
+            "8" -> Key.N8; "9" -> Key.N9
+            "a" -> Key.A; "b" -> Key.B; "c" -> Key.C; "d" -> Key.D
+            "e" -> Key.E; "f" -> Key.F; "g" -> Key.G; "h" -> Key.H
+            "i" -> Key.I; "j" -> Key.J; "k" -> Key.K; "l" -> Key.L
+            "m" -> Key.M; "n" -> Key.N; "o" -> Key.O; "p" -> Key.P
+            "q" -> Key.Q; "r" -> Key.R; "s" -> Key.S; "t" -> Key.T
+            "u" -> Key.U; "v" -> Key.V; "w" -> Key.W; "x" -> Key.X
+            "y" -> Key.Y; "z" -> Key.Z
+            "F1" -> Key.F1; "F2" -> Key.F2; "F3" -> Key.F3; "F4" -> Key.F4
+            "F5" -> Key.F5; "F6" -> Key.F6; "F7" -> Key.F7; "F8" -> Key.F8
+            "F9" -> Key.F9; "F10" -> Key.F10; "F11" -> Key.F11; "F12" -> Key.F12
+            "F13" -> Key.F13; "F14" -> Key.F14; "F15" -> Key.F15; "F16" -> Key.F16
+            "F17" -> Key.F17; "F18" -> Key.F18; "F19" -> Key.F19; "F20" -> Key.F20
+            "F21" -> Key.F21; "F22" -> Key.F22; "F23" -> Key.F23; "F24" -> Key.F24
+            "F25" -> Key.F25
+            "+" -> Key.PLUS
+            "-" -> Key.MINUS
+            "'" -> Key.APOSTROPHE
+            "\"" -> Key.QUOTE
+            else -> when (me.code) {
+                "MetaLeft" -> Key.LEFT_SUPER
+                "MetaRight" -> Key.RIGHT_SUPER
+                "ShiftLeft" -> Key.LEFT_SHIFT
+                "ShiftRight" -> Key.RIGHT_SHIFT
+                "ControlLeft" -> Key.LEFT_CONTROL
+                "ControlRight" -> Key.RIGHT_CONTROL
+                "AltLeft" -> Key.LEFT_ALT
+                "AltRight" -> Key.RIGHT_ALT
+                "Space" -> Key.SPACE
+                "ArrowUp" -> Key.UP
+                "ArrowDown" -> Key.DOWN
+                "ArrowLeft" -> Key.LEFT
+                "ArrowRight" -> Key.RIGHT
+                "PageUp" -> Key.PAGE_UP
+                "PageDown" -> Key.PAGE_DOWN
+                "Home" -> Key.HOME
+                "End" -> Key.END
+                "Enter" -> Key.ENTER
+                "Escape" -> Key.ESCAPE
+                "Backspace" -> Key.BACKSPACE
+                "Delete" -> Key.DELETE
+                "Insert" -> Key.INSERT
+                "Period" -> Key.PERIOD
+                "Comma" -> Key.COMMA
+                "Semicolon" -> Key.SEMICOLON
+                "Slash" -> Key.SLASH
+                "Tab" -> Key.TAB
+                else -> {
+                    if (window.asDynamic().korgwShowUnsupportedKeys) {
+                        console.info("Unsupported key key=${me.key}, code=${me.code}")
+                    }
+                    Key.UNKNOWN
+                }
+            }
+        }
         dispatch(keyEvent {
             this.type = when (me.type) {
                 "keydown" -> KeyEvent.Type.DOWN
@@ -144,87 +186,77 @@ class BrowserGameWindow : GameWindow() {
             }
             this.id = 0
             this.keyCode = me.keyCode
-            this.key = when (me.key) {
-                "0" -> Key.N0; "1" -> Key.N1; "2" -> Key.N2; "3" -> Key.N3
-                "4" -> Key.N4; "5" -> Key.N5; "6" -> Key.N6; "7" -> Key.N7
-                "8" -> Key.N8; "9" -> Key.N9
-                "a" -> Key.A; "b" -> Key.B; "c" -> Key.C; "d" -> Key.D
-                "e" -> Key.E; "f" -> Key.F; "g" -> Key.G; "h" -> Key.H
-                "i" -> Key.I; "j" -> Key.J; "k" -> Key.K; "l" -> Key.L
-                "m" -> Key.M; "n" -> Key.N; "o" -> Key.O; "p" -> Key.P
-                "q" -> Key.Q; "r" -> Key.R; "s" -> Key.S; "t" -> Key.T
-                "u" -> Key.U; "v" -> Key.V; "w" -> Key.W; "x" -> Key.X
-                "y" -> Key.Y; "z" -> Key.Z
-                "F1" -> Key.F1; "F2" -> Key.F2; "F3" -> Key.F3; "F4" -> Key.F4
-                "F5" -> Key.F5; "F6" -> Key.F6; "F7" -> Key.F7; "F8" -> Key.F8
-                "F9" -> Key.F9; "F10" -> Key.F10; "F11" -> Key.F11; "F12" -> Key.F12
-                "F13" -> Key.F13; "F14" -> Key.F14; "F15" -> Key.F15; "F16" -> Key.F16
-                "F17" -> Key.F17; "F18" -> Key.F18; "F19" -> Key.F19; "F20" -> Key.F20
-                "F21" -> Key.F21; "F22" -> Key.F22; "F23" -> Key.F23; "F24" -> Key.F24
-                "F25" -> Key.F25
-                "+" -> Key.PLUS
-                "-" -> Key.MINUS
-                else -> when (me.code) {
-                    "MetaLeft" -> Key.LEFT_SUPER
-                    "MetaRight" -> Key.RIGHT_SUPER
-                    "ShiftLeft" -> Key.LEFT_SHIFT
-                    "ShiftRight" -> Key.RIGHT_SHIFT
-                    "ControlLeft" -> Key.LEFT_CONTROL
-                    "ControlRight" -> Key.RIGHT_CONTROL
-                    "AltLeft" -> Key.LEFT_ALT
-                    "AltRight" -> Key.RIGHT_ALT
-                    "Space" -> Key.SPACE
-                    "ArrowUp" -> Key.UP
-                    "ArrowDown" -> Key.DOWN
-                    "ArrowLeft" -> Key.LEFT
-                    "ArrowRight" -> Key.RIGHT
-                    "Enter" -> Key.ENTER
-                    "Escape" -> Key.ESCAPE
-                    "Backspace" -> Key.BACKSPACE
-                    "Period" -> Key.PERIOD
-                    "Comma" -> Key.COMMA
-                    "Semicolon" -> Key.SEMICOLON
-                    "Slash" -> Key.SLASH
-                    "Tab" -> Key.TAB
-                    else -> Key.UNKNOWN
-                }
-            }
+            this.key = key
+            this.shift = me.shiftKey
+            this.ctrl = me.ctrlKey
+            this.alt = me.altKey
+            this.meta = me.metaKey
             this.character = me.charCode.toChar()
+        })
+
+        // @TODO: preventDefault on all causes keypress to not happen?
+        if (key == Key.TAB || key.isFunctionKey) {
+            me.preventDefault()
+        }
+    }
+
+    // JS TouchEvent contains only active touches (ie. touchend just return the list of non ended-touches)
+    private fun touchEvent(e: TouchEvent, type: com.soywiz.korev.TouchEvent.Type) {
+        val canvasBounds = canvas.getBoundingClientRect()
+        dispatch(touchBuilder.frame(TouchBuilder.Mode.JS, type) {
+            for (n in 0 until e.touches.length) {
+                val touch = e.touches.item(n) ?: continue
+                val touchId = touch.identifier
+                touch(
+                    id = touchId,
+                    x = transformEventX(touch.clientX.toDouble() - canvasBounds.left),
+                    y = transformEventY(touch.clientY.toDouble() - canvasBounds.top),
+                    force = touch.asDynamic().force.unsafeCast<Double?>() ?: 1.0,
+                    kind = Touch.Kind.FINGER
+                )
+            }
+        }.also {
+            //println("touchEvent=$it")
         })
     }
 
-    private fun touchEvent(e: TouchEvent, type: com.soywiz.korev.TouchEvent.Type) {
-        touchEvent.scaleCoords = false
-        touchEvent.startFrame(type)
-        for (n in 0 until e.touches.length) {
-            val touch = e.touches.item(n) ?: continue
-            touchEvent.touch(
-                touch.identifier,
-                transformEventX(touch.clientX.toDouble()),
-                transformEventY(touch.clientY.toDouble())
-            )
-        }
-        dispatch(touchEvent)
-    }
-
     private fun mouseEvent(e: MouseEvent, type: com.soywiz.korev.MouseEvent.Type, pressingType: com.soywiz.korev.MouseEvent.Type = type) {
-        if (!is_touch_device()) {
-            val tx = transformEventX(e.clientX.toDouble()).toInt()
-            val ty = transformEventY(e.clientY.toDouble()).toInt()
-            //console.log("mouseEvent", type.toString(), e.clientX, e.clientY, tx, ty)
-            dispatch(mouseEvent {
-                this.type = if (e.buttons.toInt() != 0) pressingType else type
-                this.scaleCoords = false
-                this.id = 0
-                this.x = tx
-                this.y = ty
-                this.button = MouseButton[e.button.toInt()]
-                this.buttons = e.buttons.toInt()
-                this.isShiftDown = e.shiftKey
-                this.isCtrlDown = e.ctrlKey
-                this.isAltDown = e.altKey
-                this.isMetaDown = e.metaKey
-            })
+        val canvasBounds = canvas.getBoundingClientRect()
+
+        val tx = transformEventX(e.clientX.toDouble() - canvasBounds.left).toInt()
+        val ty = transformEventY(e.clientY.toDouble() - canvasBounds.top).toInt()
+        //console.log("mouseEvent", type.toString(), e.clientX, e.clientY, tx, ty)
+        mouseEvent {
+            this.type = if (e.buttons.toInt() != 0) pressingType else type
+            this.scaleCoords = false
+            this.id = 0
+            this.x = tx
+            this.y = ty
+            this.button = MouseButton[e.button.toInt()]
+            this.buttons = e.buttons.toInt()
+            this.isShiftDown = e.shiftKey
+            this.isCtrlDown = e.ctrlKey
+            this.isAltDown = e.altKey
+            this.isMetaDown = e.metaKey
+            if (type == com.soywiz.korev.MouseEvent.Type.SCROLL) {
+                val we = e.unsafeCast<WheelEvent>()
+
+                this.scrollDeltaMode = when (we.deltaMode) {
+                    WheelEvent.DOM_DELTA_PIXEL -> com.soywiz.korev.MouseEvent.ScrollDeltaMode.PIXEL
+                    WheelEvent.DOM_DELTA_LINE -> com.soywiz.korev.MouseEvent.ScrollDeltaMode.LINE
+                    WheelEvent.DOM_DELTA_PAGE -> com.soywiz.korev.MouseEvent.ScrollDeltaMode.PAGE
+                    else -> com.soywiz.korev.MouseEvent.ScrollDeltaMode.LINE
+                }
+
+                this.scrollDeltaX = we.deltaX
+                this.scrollDeltaY = we.deltaY
+                this.scrollDeltaZ = we.deltaZ
+            }
+        }
+
+        // If we are in a touch device, touch events will be dispatched, and then we don't want to emit mouse events, that would be duplicated
+        if (!is_touch_device() || type == com.soywiz.korev.MouseEvent.Type.SCROLL) {
+            dispatch(mouseEvent)
         }
     }
 
@@ -235,6 +267,35 @@ class BrowserGameWindow : GameWindow() {
     override val height: Int get() = canvas.clientHeight
     override val bufferWidth: Int get() = canvas.width
     override val bufferHeight: Int get() = canvas.height
+
+    override var cursor: ICursor = Cursor.DEFAULT
+        set(value) {
+            field = value
+            canvas.style.cursor = when (value) {
+                is Cursor -> {
+                    when (value) {
+                        Cursor.DEFAULT -> "default"
+                        Cursor.CROSSHAIR -> "crosshair"
+                        Cursor.TEXT -> "text"
+                        Cursor.HAND -> "pointer"
+                        Cursor.MOVE -> "move"
+                        Cursor.WAIT -> "wait"
+                        Cursor.RESIZE_EAST -> "e-resize"
+                        Cursor.RESIZE_WEST -> "w-resize"
+                        Cursor.RESIZE_SOUTH -> "s-resize"
+                        Cursor.RESIZE_NORTH -> "n-resize"
+                        Cursor.RESIZE_NORTH_EAST -> "ne-resize"
+                        Cursor.RESIZE_NORTH_WEST -> "nw-resize"
+                        Cursor.RESIZE_SOUTH_EAST -> "se-resize"
+                        Cursor.RESIZE_SOUTH_WEST -> "sw-resize"
+                        //Cursor.ZOOM_IN -> "zoom-in"
+                        //Cursor.ZOOM_OUT -> "zoom-out"
+                        else -> "default"
+                    }
+                }
+                else -> "default"
+            }
+        }
 
     override var icon: Bitmap? = null
         set(value) {
@@ -286,7 +347,7 @@ class BrowserGameWindow : GameWindow() {
         return window.prompt(message, default) ?: throw CancellationException("cancelled")
     }
 
-    override suspend fun openFileDialog(filter: String?, write: Boolean, multi: Boolean): List<VfsFile> {
+    override suspend fun openFileDialog(filter: FileFilter?, write: Boolean, multi: Boolean, currentDir: VfsFile?): List<VfsFile> {
         val deferred = CompletableDeferred<List<VfsFile>>()
         val input = document.createElement("input").unsafeCast<HTMLInputElement>()
         input.style.position = "absolute"
@@ -339,11 +400,16 @@ class BrowserGameWindow : GameWindow() {
         window.asDynamic().canvas = canvas
         window.asDynamic().ag = ag
         window.asDynamic().gl = ag.gl
-        document.body?.appendChild(canvas)
-        document.body?.style?.margin = "0px"
-        document.body?.style?.padding = "0px"
-        document.body?.style?.overflowX = "hidden"
-        document.body?.style?.overflowY = "hidden"
+        if (isCanvasCreatedAndHandled) {
+            document.body?.appendChild(canvas)
+            document.body?.style?.margin = "0px"
+            document.body?.style?.padding = "0px"
+            document.body?.style?.overflowX = "hidden"
+            document.body?.style?.overflowY = "hidden"
+        }
+
+        canvas.addEventListener("wheel", { mouseEvent(it.unsafeCast<WheelEvent>(), com.soywiz.korev.MouseEvent.Type.SCROLL) })
+
         canvas.addEventListener("mouseenter", { mouseEvent(it.unsafeCast<MouseEvent>(), com.soywiz.korev.MouseEvent.Type.ENTER) })
         canvas.addEventListener("mouseleave", { mouseEvent(it.unsafeCast<MouseEvent>(), com.soywiz.korev.MouseEvent.Type.EXIT) })
         canvas.addEventListener("mouseover", { mouseEvent(it.unsafeCast<MouseEvent>(), com.soywiz.korev.MouseEvent.Type.MOVE, com.soywiz.korev.MouseEvent.Type.DRAG) })
@@ -378,10 +444,34 @@ class BrowserGameWindow : GameWindow() {
                 this.gamepad = e.gamepad.index
             })
         })
-
-
         window.addEventListener("resize", { onResized() })
+        canvas.ondragenter = {
+            dispatchDropfileEvent(DropFileEvent.Type.START, null)
+        }
+        canvas.ondragexit = {
+            dispatchDropfileEvent(DropFileEvent.Type.END, null)
+        }
+        canvas.ondragleave = {
+            dispatchDropfileEvent(DropFileEvent.Type.END, null)
+        }
+        canvas.ondragover = {
+            it.preventDefault()
+        }
+        canvas.ondragstart = {
+            dispatchDropfileEvent(DropFileEvent.Type.START, null)
+        }
+        canvas.ondragend = {
+            dispatchDropfileEvent(DropFileEvent.Type.END, null)
+        }
+        canvas.ondrop = {
+            it.preventDefault()
+            dispatchDropfileEvent(DropFileEvent.Type.END, null)
+            val items = it.dataTransfer!!.items
+            val files = (0 until items.length).mapNotNull { items[it]?.getAsFile()?.toVfs() }
+            dispatchDropfileEvent(DropFileEvent.Type.DROP, files)
+        }
         onResized()
+
         jsFrame = { step: Double ->
             val startTime = PerformanceCounter.reference
             window.requestAnimationFrame(jsFrame) // Execute first to prevent exceptions breaking the loop

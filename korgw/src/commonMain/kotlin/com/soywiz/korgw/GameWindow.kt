@@ -2,13 +2,13 @@ package com.soywiz.korgw
 
 import com.soywiz.kds.*
 import com.soywiz.klock.*
-import com.soywiz.klogger.*
 import com.soywiz.kmem.setBits
 import com.soywiz.korag.*
 import com.soywiz.korag.log.*
 import com.soywiz.korev.*
 import com.soywiz.korgw.internal.*
 import com.soywiz.korim.bitmap.*
+import com.soywiz.korim.color.*
 import com.soywiz.korio.*
 import com.soywiz.korio.async.*
 import com.soywiz.korio.file.*
@@ -16,6 +16,7 @@ import com.soywiz.korio.file.std.localCurrentDirVfs
 import com.soywiz.korio.file.std.localVfs
 import com.soywiz.korio.lang.*
 import com.soywiz.korio.net.*
+import com.soywiz.korio.util.*
 import com.soywiz.korma.geom.*
 import kotlinx.coroutines.*
 import kotlin.coroutines.*
@@ -26,14 +27,29 @@ var GLOBAL_CHECK_GL = false
 
 expect fun CreateDefaultGameWindow(): GameWindow
 
-interface DialogInterface {
+/**
+ * @example FileFilter("All files" to listOf("*.*"), "Image files" to listOf("*.png", "*.jpg", "*.jpeg", "*.gif"))
+ */
+data class FileFilter(val entries: List<Pair<String, List<String>>>) {
+    private val regexps = entries.flatMap { it.second }.map { Regex.fromGlob(it) }
+
+    constructor(vararg entries: Pair<String, List<String>>) : this(entries.toList())
+    fun matches(fileName: String): Boolean = entries.isEmpty() || regexps.any { it.matches(fileName) }
+}
+
+interface DialogInterface : Closeable {
     suspend fun browse(url: URL): Unit = unsupported()
     suspend fun alert(message: String): Unit = unsupported()
     suspend fun confirm(message: String): Boolean = unsupported()
     suspend fun prompt(message: String, default: String = ""): String = unsupported()
     // @TODO: Provide current directory
-    suspend fun openFileDialog(filter: String? = null, write: Boolean = false, multi: Boolean = false): List<VfsFile> =
+    suspend fun openFileDialog(filter: FileFilter? = null, write: Boolean = false, multi: Boolean = false, currentDir: VfsFile? = null): List<VfsFile> =
         unsupported()
+    override fun close(): Unit = unsupported()
+}
+
+suspend fun DialogInterface.openFileDialog(filter: String? = null, write: Boolean = false, multi: Boolean = false): List<VfsFile> {
+    return openFileDialog(null, write, multi)
 }
 
 suspend fun DialogInterface.alertError(e: Throwable) {
@@ -57,6 +73,7 @@ open class GameWindowCoroutineDispatcher : CoroutineDispatcher(), Delay, Closeab
     val timedTasks = PriorityQueue<TimedTask> { a, b -> a.time.compareTo(b.time) }
 
     fun queue(block: () -> Unit) {
+        //println("queue: $block")
         tasks.enqueue(Runnable { block() })
     }
 
@@ -67,6 +84,7 @@ open class GameWindowCoroutineDispatcher : CoroutineDispatcher(), Delay, Closeab
     }
 
     override fun dispatch(context: CoroutineContext, block: Runnable) {
+        //println("dispatch: $block")
         tasks.enqueue(block)
     }
 
@@ -94,32 +112,42 @@ open class GameWindowCoroutineDispatcher : CoroutineDispatcher(), Delay, Closeab
         }
     }
 
+    var timedTasksTime = 0.milliseconds
+    var tasksTime = 0.milliseconds
+
     fun executePending(availableTime: TimeSpan) {
         try {
             val startTime = now()
-            while (timedTasks.isNotEmpty() && startTime >= timedTasks.head.time) {
-                val item = timedTasks.removeHead()
-                if (item.exception != null) {
-                    item.continuation?.resumeWithException(item.exception!!)
-                    if (item.callback != null) {
-                        item.exception?.printStackTrace()
+
+            timedTasksTime = measureTime {
+                while (timedTasks.isNotEmpty() && startTime >= timedTasks.head.time) {
+                    val item = timedTasks.removeHead()
+                    if (item.exception != null) {
+                        item.continuation?.resumeWithException(item.exception!!)
+                        if (item.callback != null) {
+                            item.exception?.printStackTrace()
+                        }
+                    } else {
+                        item.continuation?.resume(Unit)
+                        item.callback?.run()
                     }
-                } else {
-                    item.continuation?.resume(Unit)
-                    item.callback?.run()
-                }
-                if ((now() - startTime) >= availableTime) {
-                    informTooMuchCallbacksToHandleInThisFrame()
-                    break
+                    if ((now() - startTime) >= availableTime) {
+                        informTooMuchCallbacksToHandleInThisFrame()
+                        break
+                    }
                 }
             }
-
-            while (tasks.isNotEmpty()) {
-                val task = tasks.dequeue()
-                task?.run()
-                if ((now() - startTime) >= availableTime) {
-                    informTooMuchCallbacksToHandleInThisFrame()
-                    break
+            tasksTime = measureTime {
+                while (tasks.isNotEmpty()) {
+                    val task = tasks.dequeue()
+                    val time = measureTime {
+                        task?.run()
+                    }
+                    //println("task=$time, task=$task")
+                    if ((now() - startTime) >= availableTime) {
+                        informTooMuchCallbacksToHandleInThisFrame()
+                        break
+                    }
                 }
             }
         } catch (e: Throwable) {
@@ -146,8 +174,10 @@ open class GameWindowCoroutineDispatcher : CoroutineDispatcher(), Delay, Closeab
     override fun toString(): String = "GameWindowCoroutineDispatcher"
 }
 
-open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, CoroutineContext.Element, AGWindow {
-    enum class Cursor {
+open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, CoroutineContext.Element, AGWindow, Extra by Extra.Mixin() {
+    interface ICursor
+
+    enum class Cursor : ICursor {
         DEFAULT, CROSSHAIR, TEXT, HAND, MOVE, WAIT,
         RESIZE_EAST, RESIZE_WEST, RESIZE_SOUTH, RESIZE_NORTH,
         RESIZE_NORTH_EAST, RESIZE_NORTH_WEST, RESIZE_SOUTH_EAST, RESIZE_SOUTH_WEST;
@@ -164,9 +194,9 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
                 (45.degrees * 7) to RESIZE_NORTH_EAST,
             )
 
-            fun fromAngle(angle: Angle?): Cursor? {
+            fun fromAngleResize(angle: Angle?): ICursor? {
                 var minDistance = 360.degrees
-                var cursor: Cursor? = null
+                var cursor: ICursor? = null
                 if (angle != null) {
                     for ((cangle, ccursor) in ANGLE_TO_CURSOR) {
                         val cdistance = (angle - cangle).absoluteValue
@@ -178,18 +208,70 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
                 }
                 return cursor
             }
+
+            fun fromAnchorResize(anchor: Anchor): ICursor? {
+                return when (anchor) {
+                    Anchor.TOP_LEFT -> RESIZE_NORTH_WEST
+                    Anchor.TOP -> RESIZE_NORTH
+                    Anchor.TOP_RIGHT -> RESIZE_NORTH_EAST
+                    Anchor.LEFT -> RESIZE_WEST
+                    Anchor.RIGHT -> RESIZE_EAST
+                    Anchor.BOTTOM_LEFT -> RESIZE_SOUTH_WEST
+                    Anchor.BOTTOM -> RESIZE_SOUTH
+                    Anchor.BOTTOM_RIGHT -> RESIZE_SOUTH_EAST
+                    else -> null
+                }
+            }
         }
     }
 
-    data class MenuItem(val text: String?, val enabled: Boolean = true, val children: List<MenuItem>? = null, val action: () -> Unit)
+    data class MenuItem(val text: String?, val enabled: Boolean = true, val children: List<MenuItem>? = null, val action: () -> Unit = {})
 
-    open fun showContextMenu(items: List<MenuItem?>) {
+    open fun setMainMenu(items: List<MenuItem>) {
     }
 
-    open var cursor: Cursor = Cursor.DEFAULT
+    open fun showContextMenu(items: List<MenuItem>) {
+    }
+
+    class MenuItemBuilder(private var text: String? = null, private var enabled: Boolean = true, private var action: () -> Unit = {}) {
+        @PublishedApi internal val children = arrayListOf<MenuItem>()
+
+        inline fun separator() {
+            item(null)
+        }
+
+        inline fun item(text: String?, enabled: Boolean = true, noinline action: () -> Unit = {}, block: MenuItemBuilder.() -> Unit = {}): MenuItem {
+            val mib = MenuItemBuilder(text, enabled, action)
+            block(mib)
+            val item = mib.toItem()
+            children.add(item)
+            return item
+        }
+
+        fun toItem() = MenuItem(text, enabled, children.ifEmpty { null }, action)
+    }
+
+    fun showContextMenu(block: MenuItemBuilder.() -> Unit) {
+        showContextMenu(MenuItemBuilder().also(block).toItem().children ?: listOf())
+    }
+
+    open val isSoftKeyboardVisible: Boolean get() = false
+
+    open fun setInputRectangle(windowRect: Rectangle) {
+    }
+
+    open fun showSoftKeyboard(force: Boolean = true) {
+    }
+
+    open fun hideSoftKeyboard() {
+    }
+
+    open var cursor: ICursor = Cursor.DEFAULT
 
     override val key: CoroutineContext.Key<*> get() = CoroutineKey
-    companion object CoroutineKey : CoroutineContext.Key<GameWindow>
+    companion object CoroutineKey : CoroutineContext.Key<GameWindow> {
+        val MenuItemSeparatror = MenuItem(null)
+    }
 
     override val ag: AG = LogAG()
     open val coroutineDispatcher: GameWindowCoroutineDispatcher = GameWindowCoroutineDispatcher()
@@ -211,7 +293,8 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
     private val reshapeEvent = ReshapeEvent()
     protected val keyEvent = KeyEvent()
     protected val mouseEvent = MouseEvent()
-    protected val touchEvent = TouchEvent()
+    protected val touchBuilder = TouchBuilder()
+    protected val touchEvent get() = touchBuilder.new
     protected val dropFileEvent = DropFileEvent()
     protected val gamePadUpdateEvent = GamePadUpdateEvent()
     protected val gamePadConnectionEvent = GamePadConnectionEvent()
@@ -225,6 +308,20 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
 
     open fun computeDisplayRefreshRate(): Int {
         return 60
+    }
+
+    open fun registerTime(name: String, time: TimeSpan) {
+        //println("registerTime: $name=$time")
+    }
+
+    inline fun <T> registerTime(name: String, block: () -> T): T {
+        val start = PerformanceCounter.microseconds
+        try {
+            return block()
+        } finally {
+            val end = PerformanceCounter.microseconds
+            registerTime(name, (end - start).microseconds)
+        }
     }
 
     private val fpsCached by IntTimedCache(1000.milliseconds) { computeDisplayRefreshRate() }
@@ -246,14 +343,17 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
     open var icon: Bitmap? = null
     open var fullscreen: Boolean = false
     open var visible: Boolean = false
+    open var bgcolor: RGBA = Colors.BLACK
     open var quality: Quality get() = Quality.AUTOMATIC; set(value) = Unit
 
+    val onDebugEnabled = Signal<Unit>()
     val onDebugChanged = Signal<Boolean>()
     open val debugComponent: Any? = null
     open var debug: Boolean = false
         set(value) {
             field = value
             onDebugChanged(value)
+            if (value) onDebugEnabled()
         }
 
     /**
@@ -329,10 +429,19 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
         frame(true)
     }
 
+    var renderTime = 0.milliseconds
+    var updateTime = 0.milliseconds
+
     fun frame(doUpdate: Boolean, startTime: TimeSpan = PerformanceCounter.reference) {
-        frameRender()
+        renderTime = measureTime {
+            frameRender()
+        }
+        //println("renderTime=$renderTime")
         if (doUpdate) {
-            frameUpdate(startTime)
+            updateTime = measureTime {
+                frameUpdate(startTime)
+            }
+            //println("updateTime=$updateTime")
         }
     }
 
@@ -456,6 +565,7 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
 
     fun dispatchKeyEventEx(
         type: KeyEvent.Type, id: Int, character: Char, key: Key, keyCode: Int,
+
         shift: Boolean = this.shift, ctrl: Boolean = this.ctrl, alt: Boolean = this.alt, meta: Boolean = this.meta
     ) {
         if (type != KeyEvent.Type.TYPE) {
@@ -487,7 +597,7 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
         scaleCoords: Boolean = this.scaleCoords, simulateClickOnUp: Boolean = false
     ) {
         if (type != MouseEvent.Type.DOWN && type != MouseEvent.Type.UP) {
-            this.mouseButtons = this.mouseButtons.setBits(1 shl button.ordinal, type == MouseEvent.Type.DOWN)
+            this.mouseButtons = this.mouseButtons.setBits(if (button != null) 1 shl button.ordinal else 0, type == MouseEvent.Type.DOWN)
         }
         dispatch(mouseEvent.apply {
             this.type = type
@@ -505,20 +615,18 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
             this.isMetaDown = isMetaDown
             this.scaleCoords = scaleCoords
         })
-        if (simulateClickOnUp && type == MouseEvent.Type.UP) {
-            dispatchMouseEvent(MouseEvent.Type.CLICK, id, x, y, button, buttons, scrollDeltaX, scrollDeltaY, scrollDeltaZ, isShiftDown, isCtrlDown, isAltDown, isMetaDown, scaleCoords, simulateClickOnUp = false)
-        }
+        //if (simulateClickOnUp && type == MouseEvent.Type.UP) {
+        //    dispatchMouseEvent(MouseEvent.Type.CLICK, id, x, y, button, buttons, scrollDeltaX, scrollDeltaY, scrollDeltaZ, isShiftDown, isCtrlDown, isAltDown, isMetaDown, scaleCoords, simulateClickOnUp = false)
+        //}
     }
 
-    fun dispatchTouchEventStartStart() = dispatchTouchEventStart(TouchEvent.Type.START)
-    fun dispatchTouchEventStartMove() = dispatchTouchEventStart(TouchEvent.Type.MOVE)
-    fun dispatchTouchEventStartEnd() = dispatchTouchEventStart(TouchEvent.Type.END)
-    fun dispatchTouchEventStart(type: TouchEvent.Type) = touchEvent.startFrame(type)
-    fun dispatchTouchEventAddTouch(id: Int, x: Double, y: Double) = touchEvent.touch(id, x, y)
-    fun dispatchTouchEventAddTouchAdd(id: Int, x: Double, y: Double) = touchEvent.touch(id, x, y, Touch.Status.ADD)
-    fun dispatchTouchEventAddTouchKeep(id: Int, x: Double, y: Double) = touchEvent.touch(id, x, y, Touch.Status.KEEP)
-    fun dispatchTouchEventAddTouchRemove(id: Int, x: Double, y: Double) = touchEvent.touch(id, x, y, Touch.Status.REMOVE)
-    fun dispatchTouchEventEnd() = dispatch(touchEvent)
+    // iOS tools
+    fun dispatchTouchEventModeIos() { touchBuilder.mode = TouchBuilder.Mode.IOS }
+    fun dispatchTouchEventStartStart() = touchBuilder.startFrame(TouchEvent.Type.START)
+    fun dispatchTouchEventStartMove() = touchBuilder.startFrame(TouchEvent.Type.MOVE)
+    fun dispatchTouchEventStartEnd() = touchBuilder.startFrame(TouchEvent.Type.END)
+    fun dispatchTouchEventAddTouch(id: Int, x: Double, y: Double) = touchBuilder.touch(id, x, y)
+    fun dispatchTouchEventEnd() = dispatch(touchBuilder.endFrame())
 
     // @TODO: Is this used?
     fun entry(callback: suspend () -> Unit) {
@@ -532,6 +640,9 @@ open class GameWindow : EventDispatcher.Mixin(), DialogInterface, Closeable, Cor
             }
         }
     }
+
+    //open fun lockMousePointer() = println("WARNING: lockMousePointer not implemented")
+    //open fun unlockMousePointer() = Unit
 }
 
 open class EventLoopGameWindow : GameWindow() {
@@ -638,7 +749,7 @@ open class ZenityDialogs : DialogInterface {
         ""
     }
 
-    override suspend fun openFileDialog(filter: String?, write: Boolean, multi: Boolean): List<VfsFile> {
+    override suspend fun openFileDialog(filter: FileFilter?, write: Boolean, multi: Boolean, currentDir: VfsFile?): List<VfsFile> {
         return exec(*com.soywiz.korio.util.buildList<String> {
             add("zenity")
             add("--file-selection")
@@ -664,12 +775,14 @@ fun GameWindow.configure(
     height: Int,
     title: String? = "GameWindow",
     icon: Bitmap? = null,
-    fullscreen: Boolean? = null
+    fullscreen: Boolean? = null,
+    bgcolor: RGBA = Colors.BLACK,
 ) {
     this.setSize(width, height)
     if (title != null) this.title = title
     this.icon = icon
     if (fullscreen != null) this.fullscreen = fullscreen
+    this.bgcolor = bgcolor
     this.visible = true
 }
 
