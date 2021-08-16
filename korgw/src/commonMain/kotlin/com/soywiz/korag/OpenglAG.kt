@@ -892,6 +892,7 @@ abstract class AGOpengl : AG() {
                 is NativeImage -> {
                     if (bmp.forcedTexId != -1) {
                         this.forcedTexId = bmp.forcedTexId
+                        this.transform = bmp.transformMat
                         if (bmp.forcedTexTarget != -1) this.forcedTexTarget = bmp.forcedTexTarget
                         return
                     }

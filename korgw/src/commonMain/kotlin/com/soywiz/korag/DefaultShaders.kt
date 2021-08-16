@@ -10,6 +10,7 @@ fun ProgramWithDefault(
 
 object DefaultShaders {
 	val u_Tex = Uniform("u_Tex", VarType.TextureUnit)
+    val u_TexTransformMat = Uniform("u_TexTransformMat", VarType.Mat4)
 
 	val u_ProjMat = Uniform("u_ProjMat", VarType.Mat4)
 	val u_ViewMat = Uniform("u_ViewMat", VarType.Mat4)
