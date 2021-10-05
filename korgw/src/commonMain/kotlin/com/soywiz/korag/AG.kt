@@ -855,7 +855,7 @@ abstract class AG : AGFeatures, Extra by Extra.Mixin() {
         }, FragmentShader {
             DefaultShaders.apply {
                 //out setTo vec4(1f, 1f, 0f, 1f)
-                out setTo texture2D(u_Tex, u_TexTransformMat * vec4(v_Tex["xy"], 0f.lit, 1f.lit))
+                out setTo texture2D(u_Tex, u_TexTransformMatN[0] * vec4(v_Tex["xy"], 0f.lit, 1f.lit))
             }
         })
         val uniforms = UniformValues()
@@ -871,7 +871,7 @@ abstract class AG : AGFeatures, Extra by Extra.Mixin() {
         fun draw(tex: Texture, left: Float, top: Float, right: Float, bottom: Float) {
             //tex.upload(Bitmap32(32, 32) { x, y -> Colors.RED })
             uniforms[DefaultShaders.u_Tex] = TextureUnit(tex)
-            uniforms[DefaultShaders.u_TexTransformMat] = tex.transform
+            uniforms[DefaultShaders.u_TexTransformMatN[0]] = tex.transform
 
             val texLeft = -1f
             val texRight = +1f

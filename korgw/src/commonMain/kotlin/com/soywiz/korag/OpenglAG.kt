@@ -315,6 +315,20 @@ abstract class AGOpengl : AG() {
                 }
             }
         }
+
+        fun Texture.updateTransform(index: Int) {
+            val texTransformMat = Matrix3D()
+
+            texTransformMat.setColumns4x4(transform.data, 0)
+            tempBuffer.setFloats(0, transform.data, 0, 16)
+
+            val loc = gl.getUniformLocation(glProgram.id, DefaultShaders.u_TexTransformMatN[index].name)
+            gl.uniformMatrix4fv(loc, 1, false, tempBuffer)
+            uniforms[DefaultShaders.u_TexTransformMatN[index]] = texTransformMat
+
+            // println("AG: tex transform mat: $texTransformMat")
+        }
+
         var textureUnit = 0
         //for ((uniform, value) in uniforms) {
         for (n in 0 until uniforms.uniforms.size) {
@@ -336,10 +350,12 @@ abstract class AGOpengl : AG() {
                         val tex = (unit.texture.fastCastTo<GlTexture?>())
                         tex?.bindEnsuring()
                         tex?.setFilter(unit.linear)
+                        tex?.updateTransform(textureUnit)
                     } else {
                         val tex = unit.texture.fastCastTo<TextureGeneric>()
                         tex.initialiseIfNeeded()
                         tex.bindEnsuring()
+                        tex.updateTransform(textureUnit)
                     }
                     gl.uniform1i(location, textureUnit)
                     textureUnit++
@@ -846,10 +862,12 @@ abstract class AGOpengl : AG() {
 
         val tex: Int
             get() {
+                // println("get Tex: $forcedTexId :: cached ver: $cachedVersion and context ver: $contextVersion :: texture: $this")
                 if (forcedTexId >= 0) return forcedTexId
                 if (cachedVersion != contextVersion) {
                     cachedVersion = contextVersion
                     invalidate()
+                    // return -1
                     gl.genTextures(1, texIds)
                 }
                 return texIds.getInt(0)
@@ -894,6 +912,7 @@ abstract class AGOpengl : AG() {
                         this.forcedTexId = bmp.forcedTexId
                         this.transform = bmp.transformMat
                         if (bmp.forcedTexTarget != -1) this.forcedTexTarget = bmp.forcedTexTarget
+                        gl.bindTexture(forcedTexTarget, forcedTexId)
                         return
                     }
                     prepareUploadNativeTexture(bmp)
