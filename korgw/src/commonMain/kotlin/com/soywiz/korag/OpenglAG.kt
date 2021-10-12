@@ -133,12 +133,10 @@ abstract class AGOpengl : AG() {
         }
 
         override fun close() {
-            gl.apply {
-                deleteFramebuffers(1, framebuffer)
-                deleteRenderbuffers(1, depth)
-                framebuffer.setInt(0, 0)
-                depth.setInt(0, 0)
-            }
+            gl.deleteFramebuffers(1, framebuffer)
+            gl.deleteRenderbuffers(1, depth)
+            framebuffer.setInt(0, 0)
+            depth.setInt(0, 0)
         }
 
         override fun toString(): String = "GlRenderBuffer[$id]($width, $height)"
