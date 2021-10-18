@@ -904,6 +904,7 @@ abstract class AG : AGFeatures, Extra by Extra.Mixin() {
 
     val textureDrawer by lazy { TextureDrawer() }
     val flipRenderTexture = true
+    var flipRender = false
 
     fun drawTexture(tex: Texture) {
         textureDrawer.draw(tex, -1f, +1f, +1f, -1f)
