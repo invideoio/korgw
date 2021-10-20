@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-./gradlew publishToMavenLocal generateMetadataFileForKotlinMultiplatformPublication publishKotlinMultiplatformPublicationToMavenLocal
+./gradlew :korgw:publishIosArm64PublicationToMavenLocal :korgw:generateMetadataFileForKotlinMultiplatformPublication :korgw:publishKotlinMultiplatformPublicationToMavenLocal
 #./gradlew_linux publishLinuxX64PublicationToMavenLocal # Kotlin 1.3.30 crosscompiles linux on mac
 #./gradlew_win publishMingwX64PublicationToMavenLocal publishMingwX86PublicationToMavenLocal
 ./gradlew_win publishMingwX64PublicationToMavenLocal

@@ -259,7 +259,7 @@ abstract class AGOpengl : AG() {
         val colorMask = batch.colorMask
         val renderState = batch.renderState
         val scissor = batch.scissor
-
+        println("Draw Batch")
         //finalScissor.setTo(0, 0, backWidth, backHeight)
         applyScissorState(scissor)
 
@@ -326,7 +326,8 @@ abstract class AGOpengl : AG() {
             gl.uniformMatrix4fv(loc, 1, false, tempBuffer)
             uniforms[DefaultShaders.u_TexTransformMatN[index]] = texTransformMat
 
-            // println("AG: tex transform mat: $texTransformMat")
+            println("AG: tex transform mat: $texTransformMat")
+            gl.checkError("Update transform")
         }
 
         var textureUnit = 0

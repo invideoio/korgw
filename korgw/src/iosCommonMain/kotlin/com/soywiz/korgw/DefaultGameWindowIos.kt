@@ -27,13 +27,7 @@ class IosGameWindow : GameWindow() {
 
     override suspend fun loop(entry: suspend GameWindow.() -> Unit) {
         //println("loop[0]")
-        try {
             entry(this)
-            //println("loop[1]")
-        } catch (e: Throwable) {
-            println("ERROR IosGameWindow.loop:")
-            println(e)
-        }
     }
 
     companion object {
