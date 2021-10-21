@@ -25,6 +25,7 @@ import com.soywiz.korma.geom.*
 import com.soywiz.krypto.encoding.*
 import kotlin.jvm.JvmOverloads
 import kotlin.math.*
+import kotlin.native.concurrent.SharedImmutable
 
 abstract class AGOpengl : AG() {
     class ShaderException(val str: String, val error: String, val errorInt: Int, val gl: KmlGl) :
@@ -259,7 +260,6 @@ abstract class AGOpengl : AG() {
         val colorMask = batch.colorMask
         val renderState = batch.renderState
         val scissor = batch.scissor
-        println("Draw Batch")
         //finalScissor.setTo(0, 0, backWidth, backHeight)
         applyScissorState(scissor)
 
@@ -326,8 +326,8 @@ abstract class AGOpengl : AG() {
             gl.uniformMatrix4fv(loc, 1, false, tempBuffer)
             uniforms[DefaultShaders.u_TexTransformMatN[index]] = texTransformMat
 
-            println("AG: tex transform mat: $texTransformMat")
-            gl.checkError("Update transform")
+//            println("AG: tex transform mat: $texTransformMat")
+//            gl.checkError("Update transform")
         }
 
         var textureUnit = 0
@@ -1047,10 +1047,12 @@ abstract class AGOpengl : AG() {
 }
 
 
+@SharedImmutable
 val KmlGl.versionString by Extra.PropertyThis<KmlGl, String> {
     getString(SHADING_LANGUAGE_VERSION)
 }
 
+@SharedImmutable
 val KmlGl.versionInt by Extra.PropertyThis<KmlGl, Int> {
     versionString.replace(".", "").trim().toIntOrNull() ?: 100
 }
