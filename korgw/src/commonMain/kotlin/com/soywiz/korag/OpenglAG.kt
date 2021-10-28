@@ -25,6 +25,7 @@ import com.soywiz.korma.geom.*
 import com.soywiz.krypto.encoding.*
 import kotlin.jvm.JvmOverloads
 import kotlin.math.*
+import kotlin.native.concurrent.SharedImmutable
 
 abstract class AGOpengl : AG() {
     class ShaderException(val str: String, val error: String, val errorInt: Int, val gl: KmlGl) :
@@ -1044,10 +1045,12 @@ abstract class AGOpengl : AG() {
 }
 
 
+@SharedImmutable
 val KmlGl.versionString by Extra.PropertyThis<KmlGl, String> {
     getString(SHADING_LANGUAGE_VERSION)
 }
 
+@SharedImmutable
 val KmlGl.versionInt by Extra.PropertyThis<KmlGl, Int> {
     versionString.replace(".", "").trim().toIntOrNull() ?: 100
 }
