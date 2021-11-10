@@ -321,9 +321,11 @@ abstract class AGOpengl : AG() {
             texTransformMat.setColumns4x4(transform.data, 0)
             tempBuffer.setFloats(0, transform.data, 0, 16)
 
-            val loc = gl.getUniformLocation(glProgram.id, DefaultShaders.u_TexTransformMatN[index].name)
-            gl.uniformMatrix4fv(loc, 1, false, tempBuffer)
-            uniforms[DefaultShaders.u_TexTransformMatN[index]] = texTransformMat
+            if (index < DefaultShaders.u_TexTransformMatN.size) {
+                val loc = gl.getUniformLocation(glProgram.id, DefaultShaders.u_TexTransformMatN[index].name)
+                gl.uniformMatrix4fv(loc, 1, false, tempBuffer)
+                uniforms[DefaultShaders.u_TexTransformMatN[index]] = texTransformMat
+            }
 
             // println("AG: tex transform mat: $texTransformMat")
         }
